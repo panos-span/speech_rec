@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 
-
 class TorchDNN(nn.Module):
     """Create a DNN to extract posteriors that can be used for HMM decoding
     Parameters:
@@ -13,13 +12,13 @@ class TorchDNN(nn.Module):
         dropout_p (float): Dropout probability for regularization
     """
     def __init__(
-        self, input_dim, output_dim, num_layers=2, batch_norm=True, hidden_dim=128, dropout_p=0.2
+        self, input_dim, output_dim, num_layers=2, batch_norm=True, hidden_dim=256, dropout_p=0.2
     ):
         super(TorchDNN, self).__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
         
-        # Create sequential model
+        # Create layers
         layers = []
         
         # Input layer
@@ -30,7 +29,7 @@ class TorchDNN(nn.Module):
         layers.append(nn.Dropout(dropout_p))
         
         # Hidden layers
-        for i in range(num_layers - 1):
+        for _ in range(num_layers - 1):
             layers.append(nn.Linear(hidden_dim, hidden_dim))
             if batch_norm:
                 layers.append(nn.BatchNorm1d(hidden_dim))
@@ -40,7 +39,7 @@ class TorchDNN(nn.Module):
         # Output layer
         layers.append(nn.Linear(hidden_dim, output_dim))
         
-        # Create the sequential model
+        # Create sequential model
         self.model = nn.Sequential(*layers)
 
     def forward(self, x):

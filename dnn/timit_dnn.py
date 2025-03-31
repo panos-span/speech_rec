@@ -14,18 +14,18 @@ import gc  # Garbage collector
 from torch_dataset import TorchSpeechDataset
 from torch_dnn import TorchDNN
 
-# Force CPU to avoid CUDA issues
-DEVICE = torch.device("cpu")
+# Use GPU if available
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {DEVICE}")
 
 # Configuration
 NUM_LAYERS = 2
-HIDDEN_DIM = 128  # Reduced for memory efficiency
+HIDDEN_DIM = 256
 USE_BATCH_NORM = True
 DROPOUT_P = 0.2
-EPOCHS = 20  # Reduced for faster training
-PATIENCE = 3
-BATCH_SIZE = 64  # Smaller batch size for memory efficiency
+EPOCHS = 50
+PATIENCE = 5
+BATCH_SIZE = 512
 
 if len(sys.argv) < 2:
     print("USAGE: python timit_dnn.py <PATH/TO/CHECKPOINT_TO_SAVE.pt>")
@@ -38,7 +38,7 @@ TRAIN_ALIGNMENT_DIR = "../exp/tri1_ali_train"
 DEV_ALIGNMENT_DIR = "../exp/tri1_ali_dev"
 TEST_ALIGNMENT_DIR = "../exp/tri1_ali_test"
 
-def train(model, criterion, optimizer, train_loader, dev_loader, epochs=20, patience=3):
+def train(model, criterion, optimizer, scheduler, train_loader, dev_loader, epochs=50, patience=3):
     """Train model with early stopping and memory optimizations"""
     best_val_loss = float('inf')
     patience_counter = 0
@@ -71,7 +71,7 @@ def train(model, criterion, optimizer, train_loader, dev_loader, epochs=20, pati
             _, predicted = torch.max(outputs, 1)
             train_total += targets.size(0)
             train_correct += (predicted == targets).sum().item()
-            
+
             # Report progress
             if (batch_idx + 1) % 10 == 0:
                 print(f"  Batch {batch_idx+1}/{len(train_loader)}, Loss: {loss.item():.4f}")
@@ -113,6 +113,13 @@ def train(model, criterion, optimizer, train_loader, dev_loader, epochs=20, pati
         print(f"  Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
         print(f"  Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
         
+        # Step the scheduler with validation loss
+        scheduler.step(val_loss)
+        
+        # Print current learning rate
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"  Current Learning Rate: {current_lr:.6f}")
+        
         # Early stopping
         if val_loss < best_val_loss:
             print(f"  Validation loss improved from {best_val_loss:.4f} to {val_loss:.4f}")
@@ -126,6 +133,7 @@ def train(model, criterion, optimizer, train_loader, dev_loader, epochs=20, pati
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
                     'val_loss': val_loss,
                     'val_acc': val_acc
                 }, BEST_CHECKPOINT)
@@ -154,13 +162,13 @@ try:
     print("Normalizing features...")
     scaler = StandardScaler()
     scaler.fit(trainset.feats)
-    trainset.feats = scaler.transform(trainset.feats).astype(np.float32)  # Use float32 to save memory
-    validset.feats = scaler.transform(validset.feats).astype(np.float32)
-    testset.feats = scaler.transform(testset.feats).astype(np.float32)
+    trainset.feats = scaler.transform(trainset.feats)
+    validset.feats = scaler.transform(validset.feats)
+    testset.feats = scaler.transform(testset.feats)
     
     # Get dimensions
     feature_dim = trainset.feats.shape[1]
-    n_classes = int(np.max(trainset.labels) + 1)  # Use max+1 for number of classes
+    n_classes = int(np.max(trainset.labels) + 1)
     
     print(f"Feature dimension: {feature_dim}")
     print(f"Number of classes: {n_classes}")
@@ -184,12 +192,29 @@ try:
     
     # Define optimizer and loss function
     print("Creating optimizer and loss function...")
-    optimizer = optim.SGD(dnn.parameters(), lr=0.01, momentum=0.9)
+    # Define Adam optimizer with better parameters and scheduler
+    optimizer = optim.Adam(
+        dnn.parameters(),
+        lr=0.002,
+        weight_decay=1e-5    # L2 regularization to prevent overfitting
+    )
+
+    # Learning rate scheduler options
+    # Option 1: ReduceLROnPlateau - Reduces learning rate when metric plateaus
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode='min',          # Reduce LR when monitored value stops decreasing
+        factor=0.1,          # Multiply LR by this factor
+        patience=3,         # Number of epochs with no improvement after which LR will be reduced
+        verbose=True,        # Print message when LR is reduced
+        min_lr=1e-6          # Lower bound on the learning rate
+    )
+
     criterion = nn.CrossEntropyLoss()
     
     # Train model
     print("Starting training...")
-    train(dnn, criterion, optimizer, train_loader, dev_loader, epochs=EPOCHS, patience=PATIENCE)
+    train(dnn, criterion, optimizer, scheduler, train_loader, dev_loader, epochs=EPOCHS, patience=PATIENCE)
     
 except Exception as e:
     print(f"Error: {e}")

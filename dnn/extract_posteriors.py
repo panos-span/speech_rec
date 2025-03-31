@@ -25,14 +25,14 @@ if not os.path.exists(OUT_DIR):
     os.makedirs(OUT_DIR)
 OUTPUT_ARK_FILE = os.path.join(OUT_DIR, "posteriors.ark")
 
-DEVICE = torch.device("cpu")
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {DEVICE}")
 
 # Alignment directories
 TRAIN_ALIGNMENT_DIR = "../exp/tri1_ali_train"
 TEST_ALIGNMENT_DIR = "../exp/tri1_ali_test"
 
-def extract_logits(model, test_dataset, batch_size=64):
+def extract_logits(model, test_dataset, batch_size=256):
     """Extract log-posteriors with memory efficiency"""
     model.eval()
     all_logits = []
@@ -81,7 +81,7 @@ try:
         # Create a new model with the correct dimensions
         feature_dim = testset.feats.shape[1]
         n_classes = int(np.max(trainset.labels) + 1)
-        model = TorchDNN(feature_dim, n_classes)
+        model = TorchDNN(feature_dim, n_classes, hidden_dim=256)
         
         # Load the state dictionary
         if 'model_state_dict' in checkpoint:
@@ -97,7 +97,7 @@ try:
         print("Creating a dummy model for testing")
         feature_dim = testset.feats.shape[1]
         n_classes = int(np.max(trainset.labels) + 1)
-        model = TorchDNN(feature_dim, n_classes)
+        model = TorchDNN(feature_dim, n_classes, hidden_dim=256)
         model = model.to(DEVICE)
     
     # Extract log posteriors
